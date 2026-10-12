@@ -1,0 +1,521 @@
+openapi: 3.1.0
+info:
+  title: WhatsApp Coexistence Admin API
+  version: 1.0.0
+  description: Phase-one contract for the platform console and tenant admin console. All JSON endpoints return or accept UTF-8 JSON unless noted.
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+paths:
+  /auth/csrf:
+    get:
+      security: []
+      operationId: getCsrfToken
+      responses:
+        '200':
+          description: CSRF token bound to the browser session bootstrap
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CsrfToken' }
+  /auth/sessions:
+    post:
+      security: []
+      operationId: createSession
+      parameters: [{ $ref: '#/components/parameters/CsrfHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '204': { description: Secure session cookie set }
+        '401': { $ref: '#/components/responses/Problem' }
+  /auth/session:
+    delete:
+      operationId: deleteSession
+      parameters: [{ $ref: '#/components/parameters/CsrfHeader' }]
+      responses:
+        '204': { description: Session revoked and cookie cleared }
+  /auth/invitations/accept:
+    post:
+      security: []
+      operationId: acceptInvitation
+      parameters: [{ $ref: '#/components/parameters/CsrfHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string, minLength: 32 }
+                password: { type: string, minLength: 12, maxLength: 256 }
+      responses:
+        '204': { description: Invitation accepted }
+        '422': { $ref: '#/components/responses/Problem' }
+  /auth/password-resets:
+    post:
+      security: []
+      operationId: requestPasswordReset
+      parameters: [{ $ref: '#/components/parameters/CsrfHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties: { email: { type: string, format: email } }
+      responses:
+        '202': { description: Accepted without disclosing account existence }
+  /auth/password-resets/confirm:
+    post:
+      security: []
+      operationId: confirmPasswordReset
+      parameters: [{ $ref: '#/components/parameters/CsrfHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string, minLength: 32 }
+                password: { type: string, minLength: 12, maxLength: 256 }
+      responses:
+        '204': { description: Password changed and prior sessions revoked }
+        '422': { $ref: '#/components/responses/Problem' }
+  /me:
+    get:
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Current identity and tenant state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentUser' }
+  /platform/tenants:
+    get:
+      operationId: listTenants
+      x-roles: [SUPER_ADMIN]
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: query, in: query, schema: { type: string, maxLength: 160 } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/TenantStatus' } }
+      responses:
+        '200':
+          description: Tenant page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantPage' }
+    post:
+      operationId: createTenant
+      x-roles: [SUPER_ADMIN]
+      parameters: [{ $ref: '#/components/parameters/CsrfHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, adminEmail]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 160 }
+                adminEmail: { type: string, format: email }
+      responses:
+        '201':
+          description: Tenant and its single admin invitation created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /platform/tenants/{tenantId}:
+    get:
+      operationId: getTenant
+      x-roles: [SUPER_ADMIN]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      responses:
+        '200':
+          description: Tenant metadata and aggregate connection health
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+  /platform/tenants/{tenantId}/suspend:
+    post:
+      operationId: suspendTenant
+      x-roles: [SUPER_ADMIN]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { $ref: '#/components/parameters/CsrfHeader' }
+      responses:
+        '200': { description: Tenant suspended; inbound processing continues }
+  /platform/tenants/{tenantId}/restore:
+    post:
+      operationId: restoreTenant
+      x-roles: [SUPER_ADMIN]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { $ref: '#/components/parameters/CsrfHeader' }
+      responses:
+        '200': { description: Tenant restored and accumulated inbound data becomes visible }
+  /platform/tenants/{tenantId}/close:
+    post:
+      operationId: closeTenant
+      x-roles: [SUPER_ADMIN]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { $ref: '#/components/parameters/CsrfHeader' }
+      responses:
+        '202': { description: Tenant closed and content purge scheduled within 30 days }
+  /whatsapp/connections:
+    get:
+      operationId: listConnections
+      x-roles: [ADMIN]
+      responses:
+        '200':
+          description: All numbers linked to the current tenant
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Connection' }
+  /whatsapp/signup-attempts:
+    post:
+      operationId: createSignupAttempt
+      x-roles: [ADMIN]
+      parameters: [{ $ref: '#/components/parameters/CsrfHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [COEXISTENCE, CLOUD_API_ONLY] }
+      responses:
+        '201':
+          description: Browser-safe Embedded Signup parameters
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignupAttempt' }
+  /whatsapp/signup-attempts/{attemptId}/complete:
+    post:
+      operationId: completeSignupAttempt
+      x-roles: [ADMIN]
+      parameters:
+        - { name: attemptId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfHeader' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [authorizationCode, sessionInfo]
+              properties:
+                authorizationCode: { type: string, minLength: 1 }
+                sessionInfo: { type: object, additionalProperties: true }
+      responses:
+        '202': { description: Code accepted for server-side exchange and WABA subscription }
+        '422': { $ref: '#/components/responses/Problem' }
+  /whatsapp/connections/{connectionId}:
+    get:
+      operationId: getConnection
+      x-roles: [ADMIN]
+      parameters: [{ $ref: '#/components/parameters/ConnectionId' }]
+      responses:
+        '200':
+          description: Connection, sync, quality, and health detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connection' }
+  /whatsapp/connections/{connectionId}/disconnect:
+    post:
+      operationId: disconnectConnection
+      x-roles: [ADMIN]
+      parameters:
+        - { $ref: '#/components/parameters/ConnectionId' }
+        - { $ref: '#/components/parameters/CsrfHeader' }
+      responses:
+        '200': { description: Number disconnected; history remains read-only }
+  /whatsapp/connections/{connectionId}/syncs:
+    get:
+      operationId: listConnectionSyncs
+      x-roles: [ADMIN]
+      parameters: [{ $ref: '#/components/parameters/ConnectionId' }]
+      responses:
+        '200':
+          description: Contact and history sync progress
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SyncRun' }
+  /conversations:
+    get:
+      operationId: listConversations
+      x-roles: [ADMIN]
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: connectionId, in: query, schema: { type: string, format: uuid } }
+        - { name: query, in: query, schema: { type: string, maxLength: 120 } }
+      responses:
+        '200':
+          description: Tenant-wide page retaining a connection identity on each conversation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConversationPage' }
+  /conversations/{conversationId}/messages:
+    get:
+      operationId: listMessages
+      x-roles: [ADMIN]
+      parameters:
+        - { name: conversationId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Stable chronological message page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessagePage' }
+    post:
+      operationId: sendMessage
+      x-roles: [ADMIN]
+      parameters:
+        - { name: conversationId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfHeader' }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 16, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendMessageRequest' }
+      responses:
+        '202':
+          description: Queued subject to the per-number rate limiter
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /templates:
+    get:
+      operationId: listTemplates
+      x-roles: [ADMIN]
+      parameters:
+        - { name: connectionId, in: query, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Template page
+    post:
+      operationId: createTemplate
+      x-roles: [ADMIN]
+      parameters: [{ $ref: '#/components/parameters/CsrfHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTemplateRequest' }
+      responses:
+        '202': { description: Template submitted to Meta }
+  /audit-events:
+    get:
+      operationId: listAuditEvents
+      x-roles: [SUPER_ADMIN, ADMIN]
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200': { description: Redacted, role-filtered audit page }
+  /media/{mediaId}/access:
+    post:
+      operationId: createMediaAccessUrl
+      x-roles: [ADMIN]
+      parameters:
+        - { name: mediaId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfHeader' }
+      responses:
+        '200':
+          description: Short-lived tenant-authorized object URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, expiresAt]
+                properties:
+                  url: { type: string, format: uri }
+                  expiresAt: { type: string, format: date-time }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-session
+  parameters:
+    CsrfHeader:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: { type: string, minLength: 32 }
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ConnectionId:
+      name: connectionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+  responses:
+    Problem:
+      description: RFC 9457-style problem response with no secret or message content
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    CsrfToken:
+      type: object
+      required: [token]
+      properties: { token: { type: string } }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1, maxLength: 256 }
+    CurrentUser:
+      type: object
+      required: [id, email, role]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role: { type: string, enum: [SUPER_ADMIN, ADMIN] }
+        tenantId: { type: [string, 'null'], format: uuid }
+        tenantStatus: { anyOf: [{ $ref: '#/components/schemas/TenantStatus' }, { type: 'null' }] }
+    TenantStatus: { type: string, enum: [ACTIVE, SUSPENDED, CLOSED] }
+    Tenant:
+      type: object
+      required: [id, name, status, numberCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        status: { $ref: '#/components/schemas/TenantStatus' }
+        numberCount: { type: integer, minimum: 0 }
+        connectedNumberCount: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+    TenantPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Tenant' } }
+        nextCursor: { type: [string, 'null'] }
+    Connection:
+      type: object
+      required: [id, phoneNumberId, displayPhoneNumber, mode, status]
+      properties:
+        id: { type: string, format: uuid }
+        phoneNumberId: { type: string }
+        displayPhoneNumber: { type: string }
+        verifiedName: { type: [string, 'null'] }
+        mode: { type: string, enum: [COEXISTENCE, CLOUD_API_ONLY] }
+        status: { type: string, enum: [PENDING, CONNECTED, DISCONNECTED, ERROR] }
+        qualityRating: { type: [string, 'null'] }
+        lastWebhookAt: { type: [string, 'null'], format: date-time }
+    SignupAttempt:
+      type: object
+      required: [id, configurationId, state, sdkVersion, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        configurationId: { type: string }
+        state: { type: string }
+        sdkVersion: { type: string }
+        expiresAt: { type: string, format: date-time }
+    SyncRun:
+      type: object
+      required: [id, type, state]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [CONTACTS, HISTORY] }
+        state: { type: string, enum: [ELIGIBLE, DECLINED, REQUESTED, IN_PROGRESS, COMPLETED, FAILED, EXPIRED] }
+        completedUnits: { type: integer, minimum: 0 }
+        totalUnits: { type: [integer, 'null'], minimum: 0 }
+    Conversation:
+      type: object
+      required: [id, connectionId, contact, lastMessageAt, unreadCount]
+      properties:
+        id: { type: string, format: uuid }
+        connectionId: { type: string, format: uuid }
+        contact: { type: string }
+        lastMessageAt: { type: string, format: date-time }
+        unreadCount: { type: integer, minimum: 0 }
+    ConversationPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Conversation' } }
+        nextCursor: { type: [string, 'null'] }
+    Message:
+      type: object
+      required: [id, connectionId, conversationId, direction, type, status, occurredAt]
+      properties:
+        id: { type: string, format: uuid }
+        connectionId: { type: string, format: uuid }
+        conversationId: { type: string, format: uuid }
+        wamid: { type: [string, 'null'] }
+        direction: { type: string, enum: [INBOUND, OUTBOUND] }
+        type: { type: string }
+        text: { type: [string, 'null'] }
+        mediaId: { type: [string, 'null'], format: uuid }
+        status: { type: string }
+        occurredAt: { type: string, format: date-time }
+    MessagePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Message' } }
+        nextCursor: { type: [string, 'null'] }
+    SendMessageRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [TEXT, TEMPLATE, MEDIA] }
+        text: { type: string, maxLength: 4096 }
+        templateId: { type: string, format: uuid }
+        mediaId: { type: string, format: uuid }
+    CreateTemplateRequest:
+      type: object
+      required: [connectionId, name, language, category, components]
+      properties:
+        connectionId: { type: string, format: uuid }
+        name: { type: string, pattern: '^[a-z0-9_]+$' }
+        language: { type: string }
+        category: { type: string }
+        components: { type: array, items: { type: object, additionalProperties: true } }
+    Problem:
+      type: object
+      required: [type, title, status, correlationId]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        correlationId: { type: string }
+
